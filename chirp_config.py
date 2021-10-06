@@ -6,6 +6,7 @@ except ImportError as e:
     import configparser2 as configparser
     
 import json
+import time
 
 class chirp_config:
     def __init__(self,fname=None):
@@ -36,7 +37,8 @@ class chirp_config:
                      "save_raw_voltage":"false",                     
                      "serendipitous":"false",
                      "sounder_timings":'[{"chirp-rate":500.0084e3,"rep":60.0,"chirpt":54.0016,"id":5}]',
-                     "n_downconversion_threads":"4"}
+                     "n_downconversion_threads":"4",
+                     "output_dir_time":"0"}
 
         if fname != None:
             if os.path.exists(fname):
@@ -68,6 +70,7 @@ class chirp_config:
         self.maximum_analysis_frequency=json.loads(c["config"]["maximum_analysis_frequency"])
         self.minimum_analysis_frequency=json.loads(c["config"]["minimum_analysis_frequency"])        
         self.output_dir=json.loads(c["config"]["output_dir"])
+        self.output_dir_time=json.loads(c["config"]["output_dir_time"])
 
         try:
             os.mkdir(self.output_dir)
@@ -77,6 +80,9 @@ class chirp_config:
         if not os.path.exists(self.output_dir):
             print("Output directory %s doesn't exists and cannot be created"%(self.output_dir))
             exit(0)
+        
+        if (self.output_dir_time == 0):
+            self.output_dir_time = time.time()
             
         # the minimum distance in frequency between detections
         # (avoid multiple detections of the same chirp)

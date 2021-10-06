@@ -50,11 +50,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("rate", po::value<double>(&rate)->default_value(25e6), "rate of incoming samples")
         ("dilv", "specify to disable inner-loop verbose")
         ("channels", po::value<std::string>(&channel_list)->default_value("0"), "which channel(s) to use (specify \"0\", \"1\", \"0,1\", etc)")
- 
     ;
-
-
-
 
     Digital_rf_write_object * data_object = NULL; /* main object created by init */
     uint64_t vector_leading_edge_index = 0; /* index of the sample being written starting at zero with the first sample recorded */
@@ -81,7 +77,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     int marching_periods = 1; /* marching periods when writing */
     char uuid[100] = "Fake UUID - use a better one!";
     uint64_t vector_length = 363; /* one packet */
-
     
     // clang-format on
     po::variables_map vm;
@@ -104,11 +99,12 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     boost::split(channel_strings, channel_list, boost::is_any_of("\"',"));
     for (size_t ch = 0; ch < channel_strings.size(); ch++) {
         size_t chan = std::stoi(channel_strings[ch]);
-	std::cout << chan << std::endl;
+        std::cout << chan << std::endl;
         if (chan >= usrp->get_tx_num_channels() or chan >= usrp->get_rx_num_channels()) {
             throw std::runtime_error("Invalid channel(s) specified.");
-        } else
+        } else {
             channel_nums.push_back(std::stoi(channel_strings[ch]));
+        }
     }
     std::cout << "done channels" << std::endl;
 
@@ -119,15 +115,15 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     printf("waiting for lock\n");
     // Wait for GPS lock
     bool gps_locked = usrp->get_mboard_sensor("gps_locked").to_bool();
-    while (gps_locked == false){
-      // sleep for 10 seconds
-      std::this_thread::sleep_for(std::chrono::seconds(10));
-      gps_locked = usrp->get_mboard_sensor("gps_locked").to_bool();
-      printf("No GPS lock, waiting for lock.\n");
+    while (gps_locked == false) {
+        // sleep for 10 seconds
+        std::this_thread::sleep_for(std::chrono::seconds(10));
+        gps_locked = usrp->get_mboard_sensor("gps_locked").to_bool();
+        printf("No GPS lock, waiting for lock.\n");
     }
     
     const time_t gps_time = usrp->get_mboard_sensor("gps_time").to_int();
-    usrp->set_time_next_pps(uhd::time_spec_t(gps_time+1));
+    usrp->set_time_next_pps(uhd::time_spec_t(static_cast<int64_t>(gps_time+1)));
     
     // Wait for it to apply
     // The wait is 2 seconds because N-Series has a known issue where
@@ -141,7 +137,6 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     // set the rx sample rate
     printf("Setting sample-rate to %1.2f",rate);
     usrp->set_rx_rate(rate);
-
 
     usrp->set_rx_freq(12.5e6);
     usrp->set_rx_subdev_spec(subdev);
@@ -157,12 +152,9 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     uhd::time_spec_t ts_t0=uhd::time_spec_t(tstart);
     printf("Streaming start at %f\n",time_last_pps.get_real_secs()+2.0);
 
-
     /* start recording at global_start_sample */
     global_start_index = (uint64_t)((uint64_t)tstart * (long double)sample_rate_numerator/sample_rate_denominator);
     printf("%lld\n",global_start_index);
-    
-
 
     std::string ch_dir = outdir+"/cha";
     //    std::cout << ch_dir << std::endl;
@@ -190,9 +182,9 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
 					       num_subchannels,
 					       is_continuous,
 					       marching_periods);
-    if (!data_object){
-      printf("no data object created\n");
-      exit(-1);
+    if (!data_object) {
+        printf("no data object created\n");
+        exit(-1);
     }
 
     uhd::stream_cmd_t stream_cmd(uhd::stream_cmd_t::STREAM_MODE_START_CONTINUOUS);
@@ -206,10 +198,11 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     uhd::rx_metadata_t md;
 
     // allocate buffer to receive with samples
-    std::vector<std::complex<short>> buff(rx_stream->get_max_num_samps());
+    std::vector<std::complex<short> > buff(rx_stream->get_max_num_samps());
     std::vector<void*> buffs;
-    for (size_t ch = 0; ch < rx_stream->get_num_channels(); ch++)
+    for (size_t ch = 0; ch < rx_stream->get_num_channels(); ch++) {
         buffs.push_back(&buff.front()); // same buffer for each channel
+    }
 
     // the first call to recv() will block this many seconds before receiving
     double timeout = 3.0 + 0.1; // timeout (delay before receive + padding)
@@ -219,73 +212,61 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     uint64_t prev_tl=0;
     uint64_t samp_diff=363;
     int n_empty=0;
-    while (1)
-    {
-      // receive a single packet
-      size_t num_rx_samps = rx_stream->recv(buffs, buff.size(), md, timeout, true);
+    while (true) {
+        // receive a single packet
+        size_t num_rx_samps = rx_stream->recv(buffs, buff.size(), md, timeout, true);
 
-      if(num_rx_samps  == 363){
-	n_empty=0;
-	uint64_t tl=(uint64_t)md.time_spec.get_full_secs()*sample_rate_numerator;
-	tl=tl + (uint64_t)(md.time_spec.get_frac_secs()*((double)sample_rate_numerator));
+        if (num_rx_samps  == 363) {
+            n_empty=0;
+            uint64_t tl=(uint64_t)md.time_spec.get_full_secs()*sample_rate_numerator;
+            tl=tl + (uint64_t)(md.time_spec.get_frac_secs()*((double)sample_rate_numerator));
 
-	//      printf("tl %ld prev %ld\n",tl,prev_tl);
-	if(prev_tl!=0)
-	{
-	  samp_diff = tl-prev_tl;
-	}
-	
-	// pointer to short array
-	short *a = (short *)buff.data();
-	
-	if(samp_diff == 363)
-	{
-	  //	printf("%d\n",data_short[0]);
-	  result = digital_rf_write_hdf5(data_object, vector_leading_edge_index + packet_i*363, a, vector_length);
-	  packet_i+=1;
-	}
-	else
-	{
-	  int n_packets = samp_diff/363;
-	  printf("samp_diff %ld number of packets %d\n",samp_diff,n_packets);
-	  for(int pi = 0 ; pi < n_packets; pi++)
-	  {
-	    result = digital_rf_write_hdf5(data_object, vector_leading_edge_index + packet_i*363, a, vector_length);
-	    packet_i+=1;
-	  }
-	  
-	}
-	prev_tl=tl;
-      }
-      else
-      {
-	printf("got no data in recv %d\n",n_empty);
-	n_empty+=1;
-	if(n_empty > 10)
-	{
-	  exit(0);
-	}
-	/*	if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE) {
-	  throw std::runtime_error(str(boost::format("Receiver error %s") % md.strerror()));
-	}
-	*/
+            //      printf("tl %ld prev %ld\n",tl,prev_tl);
+            if (prev_tl!=0) {
+                samp_diff = tl-prev_tl;
+            }
 
-      }
-      // use a small timeout for subsequent packets
-      timeout = 0.1;
+            // pointer to short array
+            short *a = (short *)buff.data();
 
-      // handle the error code
-      /*
-      if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT)
-	break;
-      if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE) {
-	throw std::runtime_error(str(boost::format("Receiver error %s") % md.strerror()));
-      }
-      */
-      // check md.time_stamp
+            if (samp_diff == 363) {
+                //	printf("%d\n",data_short[0]);
+                result = digital_rf_write_hdf5(data_object, vector_leading_edge_index + packet_i*363, a, vector_length);
+                packet_i+=1;
+            } else {
+                int n_packets = samp_diff/363;
+                printf("samp_diff %ld number of packets %d\n",samp_diff,n_packets);
+                for (int pi = 0 ; pi < n_packets; pi++) {
+                    result = digital_rf_write_hdf5(data_object, vector_leading_edge_index + packet_i*363, a, vector_length);
+                    packet_i+=1;
+                }
+            }
+            prev_tl=tl;
+        } else {
+            printf("got no data in recv %d\n",n_empty);
+            n_empty+=1;
+            if (n_empty > 10) {
+                exit(0);
+            }
+            /*	if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE) {
+                throw std::runtime_error(str(boost::format("Receiver error %s") % md.strerror()));
+            }
+            */
+        }
 
+        // use a small timeout for subsequent packets
+        timeout = 0.1;
+
+        // handle the error code
+        /*
+        if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT)
+            break;
+        if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE) {
+            throw std::runtime_error(str(boost::format("Receiver error %s") % md.strerror()));
+        }
+        */
+        // check md.time_stamp
     }
-    
  
     return EXIT_SUCCESS;
 }

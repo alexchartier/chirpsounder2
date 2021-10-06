@@ -47,13 +47,15 @@ def scan_for_chirps(conf,dt=0.1):
     # detection files have names chirp*.h5
 
     if conf.realtime:
-        this_day_dname="%s/%s"%(conf.output_dir,cd.unix2dirname(time.time()))
+        this_day_dname="%s/%s" % (conf.output_dir, cd.unix2dirname(conf.output_dir_time))
         # today
         fl=glob.glob("%s/chirp*.h5"%(this_day_dname))
         fl.sort()
         # latest 100 detections
-        if len(fl)>500:
-            fl=fl[(len(fl)-500):len(fl)]
+        # if len(fl)>500:  # TODO: changed to 100
+        #    fl=fl[(len(fl)-500):len(fl)]
+        if len(fl)>20:
+            fl=fl[(len(fl)-20):len(fl)]
         if len(fl) == 0:
             print("no chirp detections yet")
             return
