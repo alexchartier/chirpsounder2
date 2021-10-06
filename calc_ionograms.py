@@ -120,7 +120,8 @@ def chirp_downconvert(conf,
     
     z_out=np.zeros(step,dtype=np.complex64)
     n_out=step
-    
+
+    #data_filename_prev = 0
     for fi in range(n_windows):
         missing=False
         try:
@@ -133,7 +134,13 @@ def chirp_downconvert(conf,
                     time.sleep(1.0)
                     sleep_time+=1.0
                     b=d.get_bounds(ch)
-                    
+            
+            # Print each unique data file that is used to process the sounder
+            #data_filename = int((i0+idx)/conf.sample_rate)
+            #if data_filename_prev == 0 or data_filename != data_filename_prev:
+            #    print("Rank", rank, "; Reading file:", data_filename)
+            #    data_filename_prev = data_filename
+
             z=d.read_vector_c81d(i0+idx,step*dec+cdc.filter_len*dec,ch)
         except:
 #            z=np.zeros(step*dec+cdc.filter_len*dec,dtype=np.complex64)
@@ -296,7 +303,7 @@ def get_next_chirp_par_file(conf, d):
         # todo: look at today and yesterday. only looking
         # at today will result in a few lost ionograms
         # when the day is changing
-        dname="%s/%s"%(conf.output_dir,cd.unix2dirname(time.time()))
+        dname="%s/%s"%(conf.output_dir,cd.unix2dirname(conf.output_dir_time))
         fl=glob.glob("%s/par*.h5"%(dname))
         fl.sort()
         
