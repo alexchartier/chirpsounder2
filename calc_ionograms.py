@@ -92,8 +92,6 @@ def copy_data_files(conf, copy_q, move_q):
         # Signal to the move process to move the copied file
         move_q.put(str(Path(staging_path, filename)))
 
-    print("Copy process ended")
-
 
 def move_data_files(conf, move_q):
     """ 
@@ -115,8 +113,6 @@ def move_data_files(conf, move_q):
         except OSError as why:
             print("Error: failed to move; Src: " + file_with_path +
                   "; Dst: " + str(output_path) + "; Reason: " + str(why))
-
-    print("Move process ended")
 
 
 def chirp_downconvert(conf,
