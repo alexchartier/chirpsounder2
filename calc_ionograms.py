@@ -6,13 +6,11 @@ import numpy as np
 import digital_rf as drf
 from mpi4py import MPI
 import glob
-import fast_exp as fe
 import scipy.signal as ss
 import scipy.constants as c
 import h5py
 import chirp_config as cc
 import chirp_det as cd
-import pyfftw
 import matplotlib.pyplot as plt
 import time
 import os
@@ -30,29 +28,6 @@ size = comm.Get_size()
 rank = comm.Get_rank()
 
 
-def fft(z, l=None):
-    """
-    wrap fft, so that it can be configured
-    """
-    if l == None:
-        l = len(z)
-    return(pyfftw.interfaces.numpy_fft.fft(z, l, planner_effort='FFTW_ESTIMATE'))
-
-
-def ifft(z, l=None):
-    """
-    wrap fft, so that it can be configured
-    """
-    if l == None:
-        l = len(z)
-    return(pyfftw.interfaces.numpy_fft.ifft(z, l, planner_effort='FFTW_ESTIMATE'))
-    # return(sf.ifft(z,l))
-
-
-def power(z):
-    return(z.real**2.0+z.imag**2.0)
-
-
 def get_m_per_Hz(rate):
     """
     Determine resolution of a sounding.
@@ -64,22 +39,6 @@ def get_m_per_Hz(rate):
     return(dt*c.c/2.0)
 
 
-def chirp(L, f0=-25e3, cr=160e3, sr=50e3, use_numpy=False):
-    """
-    Generate a chirp.
-    """
-    tv = np.arange(L, dtype=np.float64)/sr
-    dphase = 0.5*tv**2*cr*2*np.pi
-
-    if use_numpy:
-        chirp = np.exp(1j*np.mod(dphase, 2*np.pi))*np.exp(1j*2*np.pi*f0*tv)
-    else:
-        # table lookup based faster version
-        chirp = fe.expf(dphase)*fe.expf((2*np.pi*f0)*tv)
-        #   chirp=fe.expf(dphase+(2*np.pi*f0)*tv)#*fe.expf()
-    return(chirp)
-
-
 def spectrogram(x, window=1024, step=512, wf=ss.hann(1024)):
     n_spec = int((len(x)-window)/step)
     S = np.zeros([n_spec, window])
@@ -87,16 +46,6 @@ def spectrogram(x, window=1024, step=512, wf=ss.hann(1024)):
         S[i, ] = np.abs(np.fft.fftshift(
             np.fft.fft(wf*x[(i*step):(i*step+window)])))**2.0
     return(S)
-
-
-def decimate(x, dec):
-    Nout = int(np.floor(len(x)/dec))
-    idx = np.arange(Nout, dtype=np.int)*int(dec)
-    res = np.zeros(len(idx), dtype=x.dtype)
-
-    for i in np.arange(dec):
-        res += x[idx+i]
-    return(res/float(dec))
 
 
 def copy_data_files(conf, copy_q, move_q):
