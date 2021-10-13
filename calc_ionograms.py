@@ -55,7 +55,7 @@ def copy_data_files(conf, copy_q, move_q):
     queue to move the files to a different location (permanent location).
     """
     # Prepare the staging directory
-    staging_path = Path(conf.raw_iq_staging_dir, str(rank))
+    staging_path = Path(conf.data_staging_dir, str(rank))
     staging_path.mkdir(parents=True, exist_ok=True)
 
     # Process filenames from the queue until a stop

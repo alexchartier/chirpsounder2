@@ -151,7 +151,7 @@ class chirp_matched_filter_bank:
             # chirp frequency at the leading edge of the signal
             f0 = self.conf.fvec[mi]
             # clear region around detection
-            mf_p[n.max([0, mi-self.conf.mfsi])                 :n.min([mi+self.conf.mfsi, n_samps-1])] = 0.0
+            mf_p[n.max([0, mi-self.conf.mfsi]):n.min([mi+self.conf.mfsi, n_samps-1])] = 0.0
             # this is the chirp rate we've detected
             detected_chirp_rate = self.conf.chirp_rates[mf_chirp_rate_idx[mi]]
 
