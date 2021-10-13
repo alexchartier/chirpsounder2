@@ -49,6 +49,11 @@ def spectrogram(x, window=1024, step=512, wf=ss.hann(1024)):
 
 
 def copy_data_files(conf, copy_q, move_q):
+    """ 
+    When directed by the copy queue, copy files from a digital_rf location to
+    another location (temp location) and direct another process via the move
+    queue to move the files to a different location (permanent location).
+    """
     # Prepare the staging directory
     staging_path = Path(conf.raw_iq_staging_dir, str(rank))
     staging_path.mkdir(parents=True, exist_ok=True)
@@ -91,6 +96,9 @@ def copy_data_files(conf, copy_q, move_q):
 
 
 def move_data_files(conf, move_q):
+    """ 
+    When directed by the move queue, move files from one location to another.
+    """
     while True:
         file_with_path = move_q.get()
 
@@ -144,7 +152,7 @@ def chirp_downconvert(conf,
     z_out = np.zeros(step, dtype=np.complex64)
     n_out = step
 
-    data_filename_prev = 0
+    data_filename_hist = []
     for fi in range(n_windows):
         missing = False
         try:
@@ -167,12 +175,13 @@ def chirp_downconvert(conf,
         if not missing:
             # Get the name of each unique data file that is used to process the sounder
             data_filename = int((i0+idx)/conf.sample_rate)
-            if data_filename_prev == 0 or data_filename != data_filename_prev:
+            if len(data_filename_hist) == 0 or data_filename not in data_filename_hist:
                 # print("Rank", rank, "; Reading file:", data_filename)
-                data_filename_full = "rf@" + str(data_filename) + ".000.h5"
+                cid_formatted = ".%03d.h5" % (cid)
+                data_filename_full = "rf@" + str(data_filename) + cid_formatted
                 copy_q.put(data_filename_full)
 
-                data_filename_prev = data_filename
+                data_filename_hist.append(data_filename)
 
             cdc.consume(z, z_out, n_out)
         else:
@@ -420,7 +429,6 @@ def analyze_parfiles(conf, d):
         # Indicate to the processes that we are done
         copy_q.put("")
         move_q.put("")
-
         proc_copy.join()
         proc_move.join()
 
