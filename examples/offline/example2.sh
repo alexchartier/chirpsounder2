@@ -4,7 +4,7 @@
 CONF_FILE=examples/offline/example2.ini
 
 # how many CPU cores do you have
-N_CPUS=8
+N_CPUS=6
 # we use 2 cores for each mpi process when calculating an ionogram
 N_CPUS_I=`expr $N_CPUS / 2`
 

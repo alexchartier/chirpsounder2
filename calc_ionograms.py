@@ -18,7 +18,9 @@ import time
 import os
 import sys
 import traceback
-import pdb
+import shutil
+import multiprocessing as mp
+from pathlib import Path
 
 # c library
 import chirp_lib as cl
@@ -89,6 +91,38 @@ def decimate(x,dec):
         res += x[idx+i]
     return(res/float(dec))
 
+def copy_data_files(conf, q):
+    time_dir = None
+    
+    # Process files from the queue until a stop
+    while True:
+        [t0, filename] = q.get()
+        
+        # We have received the end of the list, stop
+        if filename == "":
+            break
+        
+        # Prepare the output directory
+        output_path = Path(conf.output_dir, cd.unix2dirname(t0), "raw_iq")
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        # We need to find the time directory that holds the IQ file
+        # Example: <conf.data_dir>/<conf.channel>/2021-05-04T17-00-00/rf@1620150628.000.h5
+        if not time_dir:
+            file_with_path = str(Path(conf.data_dir, conf.channel)) + "/**/" + filename
+            file_location = glob.glob(file_with_path, recursive=True)
+            if len(file_location) == 0:
+                print("Error: failed to copy", file_with_path, "because the file location could not be found")
+                continue
+            time_dir = file_location[0].split("/")[-2]
+
+        data_filename_path = Path(conf.data_dir, conf.channel, time_dir, filename)
+
+        try:
+            shutil.copy2(str(data_filename_path), str(output_path))
+        except OSError as why:
+            print("Error: failed to copy; Src: " + data_filename_path + "; Dst: " + output_path + "; Reason: " + why)
+
 def chirp_downconvert(conf,
                       t0,
                       d,
@@ -97,7 +131,8 @@ def chirp_downconvert(conf,
                       rate,
                       dec=2500,
                       realtime_req=None,
-                      cid=0):
+                      cid=0,
+                      q=None):
     cput0=time.time()
     sleep_time=0.0
     sr=conf.sample_rate
@@ -121,7 +156,7 @@ def chirp_downconvert(conf,
     z_out=np.zeros(step,dtype=np.complex64)
     n_out=step
 
-    #data_filename_prev = 0
+    data_filename_prev = 0
     for fi in range(n_windows):
         missing=False
         try:
@@ -135,11 +170,15 @@ def chirp_downconvert(conf,
                     sleep_time+=1.0
                     b=d.get_bounds(ch)
             
-            # Print each unique data file that is used to process the sounder
-            #data_filename = int((i0+idx)/conf.sample_rate)
-            #if data_filename_prev == 0 or data_filename != data_filename_prev:
-            #    print("Rank", rank, "; Reading file:", data_filename)
-            #    data_filename_prev = data_filename
+            # Get the name of each unique data file that is used to process the sounder
+            data_filename = int((i0+idx)/conf.sample_rate)
+            if data_filename_prev == 0 or data_filename != data_filename_prev:
+                print("Rank", rank, "; Reading file:", data_filename)
+                
+                data_filename_full = "rf@" + str(data_filename) + ".000.h5"
+                q.put([t0, data_filename_full])
+                
+                data_filename_prev = data_filename
 
             z=d.read_vector_c81d(i0+idx,step*dec+cdc.filter_len*dec,ch)
         except:
@@ -157,6 +196,9 @@ def chirp_downconvert(conf,
         zd[(fi*step):(fi*step+step)]=z_out
         
         idx+=dec*step
+
+    # Indicate to the copy process that we are done
+    q.put([0, ""])
 
     dr=conf.range_resolution
     df=conf.frequency_resolution
@@ -348,8 +390,8 @@ def get_next_chirp_par_file(conf, d):
         # didn't find anything. let's wait.
         time.sleep(1)
 
-        
-def analyze_parfiles(conf,d):
+
+def analyze_parfiles(conf, d):
     """ 
     Realtime analysis using newly found parameter files.
     """
@@ -363,6 +405,11 @@ def analyze_parfiles(conf,d):
         i0=np.int64(t0*conf.sample_rate)
         chirp_rate=float(np.copy(h[("chirp_rate")]))
         h.close()
+
+        # Spawn a separate process to copy the files off the ring buffer
+        filename_queue = mp.Queue()
+        proc_copy = mp.Process(target=copy_data_files, args=(conf, filename_queue,))
+        proc_copy.start()
         
         chirp_downconvert(conf,
                           t0,
@@ -371,7 +418,10 @@ def analyze_parfiles(conf,d):
                           conf.channel,
                           chirp_rate,
                           dec=conf.decimation,
-                          cid=0)
+                          cid=0,
+                          q=filename_queue)
+        
+        proc_copy.join()
         
         time.sleep(0.1)
         
@@ -382,38 +432,28 @@ if __name__ == "__main__":
     else:
         conf=cc.chirp_config()
     
-
-    
     # analyze serendpituous par files immediately after a chirp is detected
     if conf.serendipitous:
         # avoid having two processes snag the same sounder at the start
         time.sleep(rank)
         while True:
             try:
-                d=drf.DigitalRFReader(conf.data_dir)
-                analyze_parfiles(conf,d)
+                d = drf.DigitalRFReader(conf.data_dir)
+                analyze_parfiles(conf, d)
             except:
                 print("error in calc_ionograms.py. trying to restart")
                 traceback.print_exc(file=sys.stdout)
                 sys.stdout.flush()
                 time.sleep(1)
-                
-        
-        
     elif conf.realtime: # analyze analytic timings
         while True:
             try:
-                d=drf.DigitalRFReader(conf.data_dir)
-                analyze_realtime(conf,d)
+                d = drf.DigitalRFReader(conf.data_dir)
+                analyze_realtime(conf, d)
             except:
                 print("error in calc_ionograms.py. trying to restart")
                 sys.stdout.flush()
                 time.sleep(1)
-        
     else: # batch analyze
-        analyze_all(conf,d)
-
-
-
-
-    
+        d = drf.DigitalRFReader(conf.data_dir)
+        analyze_all(conf, d)
