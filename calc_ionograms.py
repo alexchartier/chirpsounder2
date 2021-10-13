@@ -91,23 +91,24 @@ def decimate(x,dec):
         res += x[idx+i]
     return(res/float(dec))
 
-def copy_data_files(conf, q):
+
+def copy_data_files(conf, copy_q, move_q):
+    # Prepare the staging directory
+    staging_path = Path(conf.raw_iq_staging_dir, str(rank))
+    staging_path.mkdir(parents=True, exist_ok=True)
+
+    # Process filenames from the queue until a stop
     time_dir = None
-    
-    # Process files from the queue until a stop
     while True:
-        [t0, filename] = q.get()
+        filename = copy_q.get()
         
         # We have received the end of the list, stop
         if filename == "":
             break
-        
-        # Prepare the output directory
-        output_path = Path(conf.output_dir, cd.unix2dirname(t0), "raw_iq")
-        output_path.mkdir(parents=True, exist_ok=True)
 
         # We need to find the time directory that holds the IQ file
         # Example: <conf.data_dir>/<conf.channel>/2021-05-04T17-00-00/rf@1620150628.000.h5
+        # or can look like: <conf.data_dir>/<conf.channel>/2021-05-04/rf@1620150628.000.h5
         if not time_dir:
             file_with_path = str(Path(conf.data_dir, conf.channel)) + "/**/" + filename
             file_location = glob.glob(file_with_path, recursive=True)
@@ -119,9 +120,35 @@ def copy_data_files(conf, q):
         data_filename_path = Path(conf.data_dir, conf.channel, time_dir, filename)
 
         try:
-            shutil.copy2(str(data_filename_path), str(output_path))
+            shutil.copy2(str(data_filename_path), str(staging_path))
         except OSError as why:
-            print("Error: failed to copy; Src: " + data_filename_path + "; Dst: " + output_path + "; Reason: " + why)
+            print("Error: failed to copy; Src: " + str(data_filename_path) + "; Dst: " + str(staging_path) + "; Reason: " + str(why))
+
+        # Signal to the move process to move the copied file
+        move_q.put(str(Path(staging_path, filename)))
+
+    print("Copy process ended")
+
+
+def move_data_files(conf, move_q):
+    while True:
+        file_with_path = move_q.get()
+
+        # We have received the end of the list, stop
+        if file_with_path == "":
+            break
+        
+        t0 = file_with_path.split("/")[-1][3:].split(".")[0]
+        output_path = Path(conf.output_dir, cd.unix2dirname(t0), "raw_iq")
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        try:
+            shutil.move(file_with_path, str(output_path))
+        except OSError as why:
+            print("Error: failed to move; Src: " + file_with_path + "; Dst: " + str(output_path) + "; Reason: " + str(why))
+
+    print("Move process ended")
+
 
 def chirp_downconvert(conf,
                       t0,
@@ -132,7 +159,7 @@ def chirp_downconvert(conf,
                       dec=2500,
                       realtime_req=None,
                       cid=0,
-                      q=None):
+                      copy_q=None):
     cput0=time.time()
     sleep_time=0.0
     sr=conf.sample_rate
@@ -170,23 +197,22 @@ def chirp_downconvert(conf,
                     sleep_time+=1.0
                     b=d.get_bounds(ch)
             
+            z=d.read_vector_c81d(i0+idx,step*dec+cdc.filter_len*dec,ch)
+        except:
+            # z=np.zeros(step*dec+cdc.filter_len*dec,dtype=np.complex64)
+            missing=True
+        
+        # we can skip this heavy step if there is missing data
+        if not missing:
             # Get the name of each unique data file that is used to process the sounder
             data_filename = int((i0+idx)/conf.sample_rate)
             if data_filename_prev == 0 or data_filename != data_filename_prev:
-                print("Rank", rank, "; Reading file:", data_filename)
-                
+                # print("Rank", rank, "; Reading file:", data_filename)
                 data_filename_full = "rf@" + str(data_filename) + ".000.h5"
-                q.put([t0, data_filename_full])
+                copy_q.put(data_filename_full)
                 
                 data_filename_prev = data_filename
 
-            z=d.read_vector_c81d(i0+idx,step*dec+cdc.filter_len*dec,ch)
-        except:
-#            z=np.zeros(step*dec+cdc.filter_len*dec,dtype=np.complex64)
-            missing=True
-            
-        # we can skip this heavy step if there is missing data
-        if not missing:
             cdc.consume(z,z_out,n_out)
         else:
             # step chirp time forward
@@ -196,9 +222,6 @@ def chirp_downconvert(conf,
         zd[(fi*step):(fi*step+step)]=z_out
         
         idx+=dec*step
-
-    # Indicate to the copy process that we are done
-    q.put([0, ""])
 
     dr=conf.range_resolution
     df=conf.frequency_resolution
@@ -213,7 +236,6 @@ def chirp_downconvert(conf,
     range_gates=ds*np.fft.fftshift(np.fft.fftfreq(fftlen,d=1.0/sr_dec))
 
     ridx=np.where(np.abs(range_gates) < conf.max_range_extent)[0]
-
     
     try:
         dname="%s/%s"%(conf.output_dir,cd.unix2dirname(t0))
@@ -406,11 +428,15 @@ def analyze_parfiles(conf, d):
         chirp_rate=float(np.copy(h[("chirp_rate")]))
         h.close()
 
-        # Spawn a separate process to copy the files off the ring buffer
-        filename_queue = mp.Queue()
-        proc_copy = mp.Process(target=copy_data_files, args=(conf, filename_queue,))
+        # Spawn a separate process to copy the files off the ring buffer and place them
+        # into the raw IQ staging directory
+        copy_q = mp.Queue()
+        move_q = mp.Queue()
+        proc_copy = mp.Process(target=copy_data_files, args=(conf, copy_q, move_q))
         proc_copy.start()
-        
+        proc_move = mp.Process(target=move_data_files, args=(conf, move_q))
+        proc_move.start()
+
         chirp_downconvert(conf,
                           t0,
                           d,
@@ -419,9 +445,14 @@ def analyze_parfiles(conf, d):
                           chirp_rate,
                           dec=conf.decimation,
                           cid=0,
-                          q=filename_queue)
+                          copy_q=copy_q)
         
+        # Indicate to the processes that we are done
+        copy_q.put("")
+        move_q.put("")
+
         proc_copy.join()
+        proc_move.join()
         
         time.sleep(0.1)
         
