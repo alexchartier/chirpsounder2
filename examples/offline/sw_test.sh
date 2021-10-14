@@ -1,7 +1,7 @@
 #
 # Off-line processing of a recording of HF obtained using thor.py
 #
-CONF_FILE=examples/offline/example2.ini
+CONF_FILE=examples/offline/sw_test.ini
 
 # how many CPU cores do you have
 N_CPUS=6

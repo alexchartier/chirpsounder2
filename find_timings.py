@@ -15,7 +15,7 @@ import time
 
 def cluster_times(t, dt=0.1, dt2=0.02, min_det=2):
     t0s = dt*n.array(n.unique(n.array(n.round(t/dt),
-                     dtype=n.int)), dtype=n.float)
+                     dtype=n.int64)), dtype=n.float64)
     ct0s = []
 
     for t0 in t0s:
