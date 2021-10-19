@@ -71,6 +71,10 @@ def unix2dirname(x):
     return(unix2date(x).strftime('%Y-%m-%d'))
 
 
+def unix2drfdirname(x):
+    return(unix2date(x).strftime('%Y-%m-%dT%H-00-00'))
+
+
 class chirp_matched_filter_bank:
     def __init__(self, conf):
         self.conf = conf

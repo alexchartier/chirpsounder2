@@ -59,7 +59,6 @@ def copy_data_files(conf, copy_q, move_q):
     staging_path.mkdir(parents=True, exist_ok=True)
 
     # Process filenames from the queue until a stop
-    time_dir = None
     while True:
         filename = copy_q.get()
 
@@ -67,18 +66,10 @@ def copy_data_files(conf, copy_q, move_q):
         if filename == "":
             break
 
-        # We need to find the time directory that holds the IQ file
+        # We need to create a string to the time directory that holds the IQ file
         # Example: <conf.data_dir>/<conf.channel>/2021-05-04T17-00-00/rf@1620150628.000.h5
-        # or can look like: <conf.data_dir>/<conf.channel>/2021-05-04/rf@1620150628.000.h5
-        if not time_dir:
-            file_with_path = str(
-                Path(conf.data_dir, conf.channel)) + "/**/" + filename
-            file_location = glob.glob(file_with_path, recursive=True)
-            if len(file_location) == 0:
-                print("Error: failed to copy", file_with_path,
-                      "because the file location could not be found")
-                continue
-            time_dir = file_location[0].split("/")[-2]
+        t0 = filename.split("/")[-1][3:].split(".")[0]
+        time_dir = cd.unix2drfdirname(t0)
 
         data_filename_path = Path(
             conf.data_dir, conf.channel, time_dir, filename)
