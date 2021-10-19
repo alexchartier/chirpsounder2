@@ -440,7 +440,7 @@ if __name__ == "__main__":
     # analyze serendpituous par files immediately after a chirp is detected
     if conf.serendipitous:
         # avoid having two processes snag the same sounder at the start
-        time.sleep(rank)
+        time.sleep(rank * 2)
         while True:
             try:
                 d = drf.DigitalRFReader(conf.data_dir)
