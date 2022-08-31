@@ -95,15 +95,19 @@ def move_data_files(conf, move_q):
         if file_with_path == "":
             break
 
-        t0 = file_with_path.split("/")[-1][3:].split(".")[0]
-        output_path = Path(conf.output_dir, cd.unix2dirname(t0), "raw_iq")
-        output_path.mkdir(parents=True, exist_ok=True)
+        # Determine if we move or delete the files
+        if conf.save_chirp_iq:
+            t0 = file_with_path.split("/")[-1][3:].split(".")[0]
+            output_path = Path(conf.output_dir, cd.unix2dirname(t0), "raw_iq")
+            output_path.mkdir(parents=True, exist_ok=True)
 
-        try:
-            shutil.move(file_with_path, str(output_path))
-        except OSError as why:
-            print("Error: failed to move; Src: " + file_with_path +
-                  "; Dst: " + str(output_path) + "; Reason: " + str(why))
+            try:
+                shutil.move(file_with_path, str(output_path))
+            except OSError as why:
+                print("Error: failed to move; Src: " + file_with_path +
+                      "; Dst: " + str(output_path) + "; Reason: " + str(why))
+        else:
+            Path(file_with_path).unlink()
 
 
 def chirp_downconvert(conf,

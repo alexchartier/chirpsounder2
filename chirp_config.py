@@ -40,7 +40,8 @@ class chirp_config:
                        "sounder_timings": '[{"chirp-rate":500.0084e3,"rep":60.0,"chirpt":54.0016,"id":5}]',
                        "n_downconversion_threads": "4",
                        "output_dir_time": "0",
-                       "data_staging_dir": "/dev/shm/hf25_tmp"}
+                       "data_staging_dir": "/dev/shm/hf25_tmp",
+                       "save_chirp_iq": "false"}
 
         if fname != None:
             if os.path.exists(fname):
@@ -80,6 +81,7 @@ class chirp_config:
         self.output_dir = json.loads(c["config"]["output_dir"])
         self.output_dir_time = json.loads(c["config"]["output_dir_time"])
         self.data_staging_dir = json.loads(c["config"]["data_staging_dir"])
+        self.save_chirp_iq = json.loads(c["config"]["save_chirp_iq"])
 
         try:
             os.mkdir(self.output_dir)
