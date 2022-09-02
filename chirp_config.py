@@ -41,7 +41,7 @@ class chirp_config:
                        "n_downconversion_threads": "4",
                        "output_dir_time": "0",
                        "data_staging_dir": "/dev/shm/hf25_tmp",
-                       "save_chirp_iq": "false"}
+                       "save_chirp_iq": "true"}
 
         if fname != None:
             if os.path.exists(fname):

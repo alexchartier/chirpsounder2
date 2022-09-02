@@ -49,7 +49,7 @@ def spectrogram(x, window=1024, step=512, wf=ss.hann(1024)):
 
 
 def copy_data_files(conf, copy_q, move_q):
-    """ 
+    """
     When directed by the copy queue, copy files from a digital_rf location to
     another location (temp location) and direct another process via the move
     queue to move the files to a different location (permanent location).
@@ -64,6 +64,11 @@ def copy_data_files(conf, copy_q, move_q):
 
         # We have received the end of the list, stop
         if filename == "":
+            try:
+                shutil.rmtree(staging_path)
+            except OSError as why:
+                print("Error: failed to delete staging path: " +
+                      str(staging_path) + "; Reason: " + str(why))
             break
 
         # We need to create a string to the time directory that holds the IQ file
@@ -104,8 +109,9 @@ def move_data_files(conf, move_q):
             try:
                 shutil.move(file_with_path, str(output_path))
             except OSError as why:
-                print("Error: failed to move; Src: " + file_with_path +
-                      "; Dst: " + str(output_path) + "; Reason: " + str(why))
+                # print("Error: failed to move; Src: " + file_with_path +
+                #      "; Dst: " + str(output_path) + "; Reason: " + str(why))
+                pass
         else:
             Path(file_with_path).unlink()
 
@@ -157,7 +163,14 @@ def chirp_downconvert(conf,
                     sleep_time += 1.0
                     b = d.get_bounds(ch)
 
-            z = d.read_vector_c81d(i0+idx, step*dec+cdc.filter_len*dec, ch)
+            z_a = d.read_vector_c81d(i0+idx, step*dec+cdc.filter_len*dec, ch)
+
+            # Phase shift and add the second channel
+            # z_b = d.read_vector_c81d(
+            #    i0+idx, step*dec+cdc.filter_len*dec, "chb")
+            # z_b = z_b * np.exp(1j * (np.pi / 2))
+            # z = z_a + z_b
+            z = z_a
         except:
             # z=np.zeros(step*dec+cdc.filter_len*dec,dtype=np.complex64)
             missing = True

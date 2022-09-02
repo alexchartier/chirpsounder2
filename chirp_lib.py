@@ -3,7 +3,9 @@ import numpy as n
 from numpy import ctypeslib
 import matplotlib.pyplot as plt
 import scipy.signal as ss
-libdc = ctypes.cdll.LoadLibrary("./libdownconvert.so")
+from pathlib import Path
+lib_filepath = Path(__file__).parent.resolve() / Path("libdownconvert.so")
+libdc = ctypes.cdll.LoadLibrary(str(lib_filepath))
 libdc.test.argtypes = [ctypeslib.ndpointer(
     n.complex64, ndim=1, flags='C'), ctypes.c_int]
 libdc.consume.argtypes = [ctypes.c_double,

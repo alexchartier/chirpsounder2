@@ -11,9 +11,9 @@ PGRM_DIR=/home/chartat1/chirpsounder2_zach
 
 # program configuration
 USRP_ADDRESS=192.168.10.14
-SAMPLE_RATE=25e6
-CENTER_FREQ=12.5e6
-CONF_FILE=$PGRM_DIR/examples/ringbuffer/ram_25.ini
+SAMPLE_RATE=12.5e6
+CENTER_FREQ=13.75e6
+CONF_FILE=$PGRM_DIR/ringbuffer/ram_12p5_two_ch.ini
 OUTPUT_DIR=./chirp2
 LOG_DIR=./logs
 
@@ -24,11 +24,11 @@ THOR_PGRM_DIR=/home/chartat1/digital_rf/python/tools
 RINGBUFFER_DIR=/dev/shm/hf25
 RINGBUFFER_STAGING_DIR=/dev/shm/hf25_staging
 # make this about a few GB more than a full sounder (25 GB)
-RINGBUFFER_SIZE=32GB
+RINGBUFFER_SIZE=52GB
 
 # start receiving to a ringbuffer
 rm -Rf $RINGBUFFER_DIR $RINGBUFFER_STAGING_DIR
-python3 $THOR_PGRM_DIR/thor.py -m $USRP_ADDRESS -d A:A -c cha -f $CENTER_FREQ -r $SAMPLE_RATE $RINGBUFFER_DIR &
+python3 $THOR_PGRM_DIR/thor.py -m $USRP_ADDRESS -d "A:A A:B" -c cha,chb -f $CENTER_FREQ -r $SAMPLE_RATE $RINGBUFFER_DIR &
 sleep 10
 
 drf ringbuffer -z $RINGBUFFER_SIZE $RINGBUFFER_DIR -p 2 &
