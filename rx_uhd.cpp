@@ -10,263 +10,266 @@
 
 #include <uhd/usrp/multi_usrp.hpp>
 #include <uhd/utils/safe_main.hpp>
-#include <uhd/utils/thread.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/format.hpp>
 #include <boost/program_options.hpp>
 #include <complex>
+#include <chrono>
 #include <thread>
 #include <iostream>
 #include <unistd.h>
+#include <filesystem>
 #include <digital_rf/digital_rf.h>
 
-#define NO_WRITE_DRF 1
-
 namespace po = boost::program_options;
+namespace fs = std::filesystem;
+namespace ch = std::chrono;
 
-int UHD_SAFE_MAIN(int argc, char* argv[])
+double set_internal_time()
 {
-    // variables to be set by po
-    std::string args;
-    std::string outdir;    
-    std::string wire;
-    std::string subdev;
-    double seconds_in_future;
-    size_t total_num_samps;
-    double rate;
-    std::string channel_list;
+    // Sync the USRP with system time
+    auto curr_time = ch::system_clock::now();
+    auto sec_since_epoch(
+        ch::duration_cast<ch::seconds>(curr_time.time_since_epoch()));
+    auto ns_since_epoch(ch::duration_cast<ch::nanoseconds>(
+        curr_time.time_since_epoch() - sec_since_epoch));
 
-    // setup the program options
+    std::string whole_string = std::to_string(sec_since_epoch.count());
+    std::string frac_string = std::to_string(ns_since_epoch.count());
+    double curr_time_sec = std::stod(whole_string + "." + frac_string);
+
+    return curr_time_sec;
+}
+
+int UHD_SAFE_MAIN(int argc, char *argv[])
+{
+    // Variables to be set by po
+    std::string args;
+    double rate;
+    double freq;
+    std::string ref_source;
+    std::string time_source;
+    std::string subdev;
+    std::string channel_list;
+    std::string outdir;
+
+    // Setup the program options
     po::options_description desc("Allowed options");
     // clang-format off
     desc.add_options()
         ("help", "help message")
-        ("args", po::value<std::string>(&args)->default_value("recv_buff_size=500000000"), "single uhd device address args")
-        ("outdir", po::value<std::string>(&outdir)->default_value("/dev/shm/hf25"), "output directory")
-        ("wire", po::value<std::string>(&wire)->default_value(""), "the over the wire type, sc16, sc8, etc")
-        ("subdev", po::value<std::string>(&subdev)->default_value("A:A"), "subdevice")
-        ("secs", po::value<double>(&seconds_in_future)->default_value(1.5), "number of seconds in the future to receive")
-        ("nsamps", po::value<size_t>(&total_num_samps)->default_value(10000), "total number of samples to receive")
-        ("rate", po::value<double>(&rate)->default_value(25e6), "rate of incoming samples")
-        ("dilv", "specify to disable inner-loop verbose")
+        ("args", po::value<std::string>(&args)->default_value("recv_buff_size=500000000"), "multi uhd device address args")
+        ("rate", po::value<double>(&rate)->default_value(25e6), "rate of incoming samples in Hz")
+        ("freq", po::value<double>(&freq)->default_value(12.5e6), "RF center frequency in Hz")
+        ("ref-source", po::value<std::string>(&ref_source)->default_value("internal"), "reference source (internal, external, mimo, gpsdo)")
+        ("time-source", po::value<std::string>(&time_source)->default_value(""), "the time source (gpsdo, external) or blank for default")
+        ("subdevice", po::value<std::string>(&subdev)->default_value("A:A"), "subdevice specification")
         ("channels", po::value<std::string>(&channel_list)->default_value("0"), "which channel(s) to use (specify \"0\", \"1\", \"0,1\", etc)")
+        ("outdir", po::value<std::string>(&outdir)->default_value("/dev/shm/hf25"), "output directory")
     ;
-
-    Digital_rf_write_object * data_object = NULL; /* main object created by init */
-    uint64_t vector_leading_edge_index = 0; /* index of the sample being written starting at zero with the first sample recorded */
-    uint64_t global_start_index; /* start sample (unix time * sample_rate) of first measurement - set below */
-    int i, result;
-
-    /* dummy dataset to write */
-    //short data_short[363][2];
-    short *data_short;
-    data_short = (short *)malloc(sizeof(short)*2*363*10);
-    void **data_ptr = (void **)&data_short;
-    //    short data_short[363][2];
-
-    /* writing parameters */
-    uint64_t sample_rate_numerator = 25000000; /* 25 MHz sample rate */
-    uint64_t sample_rate_denominator = 1;
-    uint64_t subdir_cadence = 3600;
-    uint64_t millseconds_per_file = 1000; 
-    int compression_level = 0; /* low level of compression */
-    int checksum = 0; /* no checksum */
-    int is_complex = 1; /* complex values */
-    int is_continuous = 1; /* continuous data written */
-    int num_subchannels = 1; /* only one subchannel */
-    int marching_periods = 1; /* marching periods when writing */
-    char uuid[100] = "Fake UUID - use a better one!";
-    uint64_t vector_length = 363; /* one packet */
-    
     // clang-format on
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
     po::notify(vm);
 
-    bool verbose = vm.count("dilv") == 0;
+    // Print the help message
+    if (vm.count("help"))
+    {
+        std::cout << boost::format("UHD RX %s") % desc << std::endl;
+        return ~0;
+    }
 
-    // create device
+    // Create a USRP device
+    printf("\nCreating the usrp device with: %s...\n", args.c_str());
     uhd::usrp::multi_usrp::sptr usrp = uhd::usrp::multi_usrp::make(args);
-    std::cout << channel_list;
-    printf("done\n");
-    std::cout << 1 << std::endl;
-    std::cout << usrp->get_tx_num_channels();
-    printf("done\n");
 
-    // detect which channels to use
+    // Always select the subdevice first, the channel mapping affects the other settings
+    usrp->set_rx_subdev_spec(subdev);
+
+    printf("Using Device:\n %s", usrp->get_pp_string().c_str());
+    printf("%s\n", usrp->get_rx_subdev_spec().to_pp_string().c_str());
+
+    // Detect which channels to use
     std::vector<std::string> channel_strings;
     std::vector<size_t> channel_nums;
     boost::split(channel_strings, channel_list, boost::is_any_of("\"',"));
-    for (size_t ch = 0; ch < channel_strings.size(); ch++) {
+    for (size_t ch = 0; ch < channel_strings.size(); ch++)
+    {
         size_t chan = std::stoi(channel_strings[ch]);
-        std::cout << chan << std::endl;
-        if (chan >= usrp->get_tx_num_channels() or chan >= usrp->get_rx_num_channels()) {
+        if (chan >= usrp->get_rx_num_channels())
             throw std::runtime_error("Invalid channel(s) specified.");
-        } else {
+        else
             channel_nums.push_back(std::stoi(channel_strings[ch]));
+    }
+
+    // Turn on correctors
+    usrp->set_rx_dc_offset(true);
+    usrp->set_rx_iq_balance(true);
+
+    // Lock mboard clocks
+    usrp->set_clock_source(ref_source);
+    if (!time_source.empty())
+        usrp->set_time_source(time_source);
+
+    if (time_source.empty())
+    {
+        usrp->set_time_now(uhd::time_spec_t(set_internal_time()));
+    }
+    else if (time_source.compare("gpsdo") == 0)
+    {
+        printf("Waiting for lock\n");
+        // Wait for GPS lock
+        bool gps_locked = usrp->get_mboard_sensor("gps_locked").to_bool();
+        while (gps_locked == false)
+        {
+            // sleep for 10 seconds
+            std::this_thread::sleep_for(std::chrono::seconds(10));
+            gps_locked = usrp->get_mboard_sensor("gps_locked").to_bool();
+            printf("No GPS lock, waiting for lock\n");
         }
+
+        const time_t gps_time = usrp->get_mboard_sensor("gps_time").to_int();
+        usrp->set_time_next_pps(uhd::time_spec_t(static_cast<int64_t>(gps_time + 1)));
+
+        // Wait for it to apply
+        // The wait is 2 seconds because N-Series has a known issue where
+        // the time at the last PPS does not properly update at the PPS edge
+        // when the time is actually set.
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+
+        uhd::time_spec_t time_last_pps = usrp->get_time_last_pps();
+        printf("USRP time now %1.4f USRP last pps %1.4f\n",
+               usrp->get_time_now().get_real_secs(), time_last_pps.get_real_secs());
     }
-    std::cout << "done channels" << std::endl;
 
-    // use internal gpsdo
-    //    usrp->set_clock_source("gpsdo");
-    //usrp->set_time_source("gpsdo");
-
-    printf("waiting for lock\n");
-    // Wait for GPS lock
-    bool gps_locked = usrp->get_mboard_sensor("gps_locked").to_bool();
-    while (gps_locked == false) {
-        // sleep for 10 seconds
-        std::this_thread::sleep_for(std::chrono::seconds(10));
-        gps_locked = usrp->get_mboard_sensor("gps_locked").to_bool();
-        printf("No GPS lock, waiting for lock.\n");
-    }
-    
-    const time_t gps_time = usrp->get_mboard_sensor("gps_time").to_int();
-    usrp->set_time_next_pps(uhd::time_spec_t(static_cast<int64_t>(gps_time+1)));
-    
-    // Wait for it to apply
-    // The wait is 2 seconds because N-Series has a known issue where
-    // the time at the last PPS does not properly update at the PPS edge
-    // when the time is actually set.
-    std::this_thread::sleep_for(std::chrono::seconds(2));
-
-    uhd::time_spec_t time_last_pps = usrp->get_time_last_pps();
-    printf("USRP time now %1.4f USRP last pps %1.4f\n",usrp->get_time_now().get_real_secs(),time_last_pps.get_real_secs());
-    
-    // set the rx sample rate
-    printf("Setting sample-rate to %1.2f",rate);
+    // set the RX sample rate
+    printf("Setting RX Rate: %f Msps...\n", rate / 1e6);
     usrp->set_rx_rate(rate);
 
-    usrp->set_rx_freq(12.5e6);
-    usrp->set_rx_subdev_spec(subdev);
-    
-    // create a receive streamer
+    // Set the RX center freq
+    printf("Setting RX Freq: %f MHz...\n", freq / 1e6);
+    usrp->set_rx_freq(uhd::tune_request_t(freq));
+
+    // Create a receive streamer
     uhd::stream_args_t stream_args("sc16", "sc16"); // complex shorts
-    stream_args.channels             = channel_nums;
+    stream_args.channels = channel_nums;
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
+    auto num_channels = rx_stream->get_num_channels();
 
-    //    std::this_thread::sleep_for(std::chrono::seconds(2));
-    // setup streaming
-    double tstart=time_last_pps.get_real_secs()+2.0;
-    uhd::time_spec_t ts_t0=uhd::time_spec_t(tstart);
-    printf("Streaming start at %f\n",time_last_pps.get_real_secs()+2.0);
+    // Setup streaming
+    auto start_time = usrp->get_time_now().get_real_secs() + 2.0;
+    printf("Streaming will start at: %f\n", start_time);
 
-    /* start recording at global_start_sample */
-    global_start_index = (uint64_t)((uint64_t)tstart * (long double)sample_rate_numerator/sample_rate_denominator);
-    printf("%lld\n",global_start_index);
-
-    std::string ch_dir = outdir+"/cha";
-    //    std::cout << ch_dir << std::endl;
-    std::cout << "Writing complex short to multiple files and subdirectores in " << ch_dir << std::endl;
-
-    std::string mkdir_cmd = "mkdir -p "+ch_dir;
-    std::cout << mkdir_cmd << std::endl;
-    
-    //    exit(0);
-    result = system(mkdir_cmd.c_str());
-    //    result = system("rm -Rf /dev/shm/hf25/cha/2*/tmp*.h5");
-
-    /* init */
-    data_object = digital_rf_create_write_hdf5((char *)ch_dir.c_str(),
-					       H5T_NATIVE_SHORT,
-					       subdir_cadence,
-					       millseconds_per_file,
-					       global_start_index,
-					       sample_rate_numerator,
-					       sample_rate_denominator,
-					       uuid,
-					       compression_level,
-					       checksum,
-					       is_complex,
-					       num_subchannels,
-					       is_continuous,
-					       marching_periods);
-    if (!data_object) {
-        printf("no data object created\n");
-        exit(-1);
+    // Create output dirs for up to two channels
+    std::vector<fs::path> ch_dir_list = {
+        fs::path(outdir) / fs::path("cha"),
+        fs::path(outdir) / fs::path("chb")};
+    std::error_code ec;
+    fs::create_directory(ch_dir_list[0], ec);
+    if (ec.value() != 0)
+        throw std::runtime_error("Directory could not be created");
+    if (num_channels == 2)
+    {
+        fs::create_directory(ch_dir_list[1], ec);
+        if (ec.value() != 0)
+            throw std::runtime_error("Directory could not be created");
     }
 
+    // Init DRF for up to two channels
+    std::vector<Digital_rf_write_object *> drf_objects = {NULL, NULL};
+
+    // DRF writing parameters
+    uint64_t sample_rate_numerator = rate;
+    uint64_t sample_rate_denominator = 1;
+    uint64_t global_start_index =
+        (uint64_t)((uint64_t)start_time * (long double)sample_rate_numerator / sample_rate_denominator);
+    uint64_t subdir_cadence = 3600;
+    uint64_t millseconds_per_file = 1000;
+    int compression_level = 0; // no compression
+    int checksum = 0;          // no checksum
+    int is_complex = 1;        // complex values
+    int is_continuous = 1;     // continuous data written
+    int num_subchannels = 1;   // one subchannel
+    int marching_periods = 0;  // no marching periods
+    char uuid[100] = "6HZWCRzdQYRrvNwkikPsxw0nkg2or";
+
+    drf_objects[0] = digital_rf_create_write_hdf5(strdup(ch_dir_list[0].string().c_str()),
+                                                  H5T_NATIVE_SHORT,
+                                                  subdir_cadence,
+                                                  millseconds_per_file,
+                                                  global_start_index,
+                                                  sample_rate_numerator,
+                                                  sample_rate_denominator,
+                                                  uuid,
+                                                  compression_level,
+                                                  checksum,
+                                                  is_complex,
+                                                  num_subchannels,
+                                                  is_continuous,
+                                                  marching_periods);
+    if (!drf_objects[0])
+    {
+        printf("DRF data objects failed to be created\n");
+        exit(EXIT_FAILURE);
+    }
+    if (num_channels == 2)
+    {
+        drf_objects[1] = digital_rf_create_write_hdf5(strdup(ch_dir_list[1].string().c_str()),
+                                                      H5T_NATIVE_SHORT,
+                                                      subdir_cadence,
+                                                      millseconds_per_file,
+                                                      global_start_index,
+                                                      sample_rate_numerator,
+                                                      sample_rate_denominator,
+                                                      uuid,
+                                                      compression_level,
+                                                      checksum,
+                                                      is_complex,
+                                                      num_subchannels,
+                                                      is_continuous,
+                                                      marching_periods);
+        if (!drf_objects[1])
+        {
+            printf("DRF data objects failed to be created\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    // Issue USRP stream command
     uhd::stream_cmd_t stream_cmd(uhd::stream_cmd_t::STREAM_MODE_START_CONTINUOUS);
-    // stream_cmd.num_samps  = total_num_samps;
     stream_cmd.stream_now = false;
-    stream_cmd.time_spec  = ts_t0;
-    
+    stream_cmd.time_spec = uhd::time_spec_t(start_time);
     rx_stream->issue_stream_cmd(stream_cmd);
 
-    // metadata
+    // Allocate buffers to receive with samples (one buffer per channel)
+    const size_t samps_per_buff = rx_stream->get_max_num_samps();
+    std::vector<std::vector<std::complex<short>>> buffs(
+        num_channels, std::vector<std::complex<short>>(samps_per_buff));
+
+    // Create a vector of pointers to point to each of the channel buffers
+    std::vector<std::complex<short> *> buff_ptrs;
+    for (size_t i = 0; i < buffs.size(); i++)
+        buff_ptrs.push_back(&buffs[i].front());
+
+    size_t num_rx_samps;
     uhd::rx_metadata_t md;
+    std::vector<uint64_t> vector_leading_edge_indexes(2);
+    while (true)
+    {
+        num_rx_samps = rx_stream->recv(buff_ptrs, samps_per_buff, md);
 
-    // allocate buffer to receive with samples
-    std::vector<std::complex<short> > buff(rx_stream->get_max_num_samps());
-    std::vector<void*> buffs;
-    for (size_t ch = 0; ch < rx_stream->get_num_channels(); ch++) {
-        buffs.push_back(&buff.front()); // same buffer for each channel
+        if (num_rx_samps)
+        {
+            digital_rf_write_hdf5(drf_objects[0], vector_leading_edge_indexes[0], buff_ptrs[0], num_rx_samps);
+            vector_leading_edge_indexes[0] += num_rx_samps;
+
+            if (num_channels == 2)
+            {
+                digital_rf_write_hdf5(drf_objects[1], vector_leading_edge_indexes[1], buff_ptrs[1], num_rx_samps);
+                vector_leading_edge_indexes[1] += num_rx_samps;
+            }
+        }
     }
 
-    // the first call to recv() will block this many seconds before receiving
-    double timeout = 3.0 + 0.1; // timeout (delay before receive + padding)
-
-    size_t num_acc_samps = 0; // number of accumulated samples
-    uint64_t packet_i=0;
-    uint64_t prev_tl=0;
-    uint64_t samp_diff=363;
-    int n_empty=0;
-    while (true) {
-        // receive a single packet
-        size_t num_rx_samps = rx_stream->recv(buffs, buff.size(), md, timeout, true);
-
-        if (num_rx_samps  == 363) {
-            n_empty=0;
-            uint64_t tl=(uint64_t)md.time_spec.get_full_secs()*sample_rate_numerator;
-            tl=tl + (uint64_t)(md.time_spec.get_frac_secs()*((double)sample_rate_numerator));
-
-            //      printf("tl %ld prev %ld\n",tl,prev_tl);
-            if (prev_tl!=0) {
-                samp_diff = tl-prev_tl;
-            }
-
-            // pointer to short array
-            short *a = (short *)buff.data();
-
-            if (samp_diff == 363) {
-                //	printf("%d\n",data_short[0]);
-                result = digital_rf_write_hdf5(data_object, vector_leading_edge_index + packet_i*363, a, vector_length);
-                packet_i+=1;
-            } else {
-                int n_packets = samp_diff/363;
-                printf("samp_diff %ld number of packets %d\n",samp_diff,n_packets);
-                for (int pi = 0 ; pi < n_packets; pi++) {
-                    result = digital_rf_write_hdf5(data_object, vector_leading_edge_index + packet_i*363, a, vector_length);
-                    packet_i+=1;
-                }
-            }
-            prev_tl=tl;
-        } else {
-            printf("got no data in recv %d\n",n_empty);
-            n_empty+=1;
-            if (n_empty > 10) {
-                exit(0);
-            }
-            /*	if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE) {
-                throw std::runtime_error(str(boost::format("Receiver error %s") % md.strerror()));
-            }
-            */
-        }
-
-        // use a small timeout for subsequent packets
-        timeout = 0.1;
-
-        // handle the error code
-        /*
-        if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT)
-            break;
-        if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE) {
-            throw std::runtime_error(str(boost::format("Receiver error %s") % md.strerror()));
-        }
-        */
-        // check md.time_stamp
-    }
- 
     return EXIT_SUCCESS;
 }
