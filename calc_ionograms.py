@@ -22,6 +22,7 @@ from pathlib import Path
 
 # c library
 import chirp_lib as cl
+from detect_chirps import get_metadata
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
@@ -118,7 +119,7 @@ def move_data_files(conf, move_q):
 
 def chirp_downconvert(conf,
                       t0,
-                      d,
+                      data,
                       i0,
                       ch,
                       rate,
@@ -126,21 +127,22 @@ def chirp_downconvert(conf,
                       realtime_req=None,
                       cid=0,
                       copy_q=None):
+
+
     cput0 = time.time()
     sleep_time = 0.0
-    sr = conf.sample_rate
-    cf = conf.center_freq
+    sample_rate, center_freq = get_metadata(data, ch)
     dur = conf.maximum_analysis_frequency/rate
     if realtime_req == None:
         realtime_req = dur
     idx = 0
     step = 1000
-    n_windows = int(dur*sr/(step*dec))+1
+    n_windows = int(dur*sample_rate / (step * dec)) + 1
 
-    cdc = cl.chirp_downconvert(f0=-cf,
+    cdc = cl.chirp_downconvert(f0=-center_freq,
                                rate=rate,
                                dec=dec,
-                               dt=1.0/conf.sample_rate,
+                               dt=1.0/sample_rate,
                                n_threads=conf.n_downconversion_threads)
 
     zd_len = n_windows*step
@@ -154,14 +156,14 @@ def chirp_downconvert(conf,
         missing = False
         try:
             if conf.realtime:
-                b = d.get_bounds(ch)
-                while ((i0+idx+step*dec+cdc.filter_len*dec)+int(conf.sample_rate)) > b[1]:
+                bounds = data.get_bounds(ch)
+                while ((i0+idx+step*dec+cdc.filter_len*dec)+int(sample_rate)) > bounds[1]:
                     # wait for more data to be acquired
                     # as the tail of the buffer doesn't have he data we
                     # need yet
                     time.sleep(1.0)
                     sleep_time += 1.0
-                    b = d.get_bounds(ch)
+                    bounds = d.get_bounds(ch)
 
             z_a = d.read_vector_c81d(i0+idx, step*dec+cdc.filter_len*dec, ch)
 
@@ -178,7 +180,7 @@ def chirp_downconvert(conf,
         # we can skip this heavy step if there is missing data
         if not missing:
             # Get the name of each unique data file that is used to process the sounder
-            data_filename = int((i0+idx)/conf.sample_rate)
+            data_filename = int((i0+idx)/sample_rate)
             if len(data_filename_hist) == 0 or data_filename not in data_filename_hist:
                 # print("Rank", rank, "; Reading file:", data_filename)
                 cid_formatted = ".%03d.h5" % (cid)
@@ -199,7 +201,7 @@ def chirp_downconvert(conf,
 
     dr = conf.range_resolution
     df = conf.frequency_resolution
-    sr_dec = sr/dec
+    sr_dec = sample_rate/dec
     ds = get_m_per_Hz(rate)
     fftlen = int(sr_dec*ds/dr/2.0)*2
     fft_step = int((df/rate)*sr_dec)
@@ -241,7 +243,7 @@ def chirp_downconvert(conf,
     sys.stdout.flush()
 
 
-def analyze_all(conf, d):
+def analyze_all(conf, data):
     fl = glob.glob("%s/*/par-*.h5" % (conf.output_dir))
     n_ionograms = len(fl)
     # mpi scan through the whole dataset
@@ -249,21 +251,21 @@ def analyze_all(conf, d):
         h = h5py.File(fl[ionogram_idx], "r")
         chirp_rate = np.copy(h[("chirp_rate")])
         t0 = np.copy(h[("t0")])
-        i0 = np.int64(t0*conf.sample_rate)
+        i0 = np.int64(t0*sample_rate)
         print("calculating i0=%d chirp_rate=%1.2f kHz/s t0=%1.6f" %
               (i0, chirp_rate/1e3, t0))
         h.close()
 
         chirp_downconvert(conf,
                           t0,
-                          d,
+                          data,
                           i0,
                           conf.channel,
                           chirp_rate,
                           dec=2500)
 
 
-def analyze_realtime(conf, d):
+def analyze_realtime(conf, data):
     """ 
     Realtime analysis using analytic timing
     We allocate one MPI process for each sounder to be on the safe side.
@@ -275,10 +277,12 @@ def analyze_realtime(conf, d):
     st = conf.sounder_timings[rank]
     n_sounders = len(st)
     ch = conf.channel
+    sample_rate, center_freq = get_metadata(data, ch)
+
     while True:
-        b = d.get_bounds(ch)
-        t0 = np.floor(np.float128(b[0]) / np.float128(conf.sample_rate))
-        t1 = np.floor(np.float128(b[1]) / np.float128(conf.sample_rate))
+        bounds = data.get_bounds(ch)
+        t0 = np.floor(np.float128(bounds[0]) / np.float128(sample_rate))
+        t1 = np.floor(np.float128(bounds[1]) / np.float128(sample_rate))
 
         # find the next sounder that can be measured with shortest wait time
         best_sounder = 0
@@ -307,17 +311,17 @@ def analyze_realtime(conf, d):
         next_t0 = float(best_t0)
         print("Rank %d chirp id %d analyzing chirp-rate %1.2f kHz/s chirpt %1.4f rep %1.2f" %
               (rank, best_id, chirp_rate/1e3, chirpt, rep))
-        i0 = int(next_t0*conf.sample_rate)
-        realtime_req = conf.sample_rate/chirp_rate
-        print("Buffer extent %1.2f-%1.2f launching next chirp at %1.2f %s" % (b[0]/conf.sample_rate,
-                                                                              b[1] /
-                                                                              conf.sample_rate,
+        i0 = int(next_t0*sample_rate)
+        realtime_req = sample_rate/chirp_rate
+        print("Buffer extent %1.2f-%1.2f launching next chirp at %1.2f %s" % (bounds[0]/sample_rate,
+                                                                              bounds[1] /
+                                                                              sample_rate,
                                                                               next_t0,
                                                                               cd.unix2datestr(next_t0)))
 
         chirp_downconvert(conf,
                           next_t0,
-                          d,
+                          data,
                           i0,
                           conf.channel,
                           chirp_rate,
@@ -326,20 +330,20 @@ def analyze_realtime(conf, d):
                           cid=best_id)
 
 
-def get_next_chirp_par_file(conf, d):
+def get_next_chirp_par_file(conf, data):
     """ 
     wait until we encounter a parameter file with remaining time 
     """
     # find the next sounder that can be measured
     while True:
         ch = conf.channel
-        b = d.get_bounds(ch)
-        buffer_t0 = np.floor(np.float128(b[0])/np.float128(conf.sample_rate))
+        sample_rate, center_freq = get_metadata(data, ch)
+        bounds = data.get_bounds(ch)
+        buffer_t0 = np.floor(np.float128(bounds[0])/np.float128(sample_rate))
         while np.isnan(buffer_t0):
-            b = d.get_bounds(ch)
+            bounds = data.get_bounds(ch)
             buffer_t0 = np.floor(np.float128(
-                b[0])/np.float128(conf.sample_rate))
-            # t1=np.floor(np.float128(b[1])/np.float128(conf.sample_rate))
+                bounds[0])/np.float128(sample_rate))
             print("nan bounds for ringbuffer. trying again")
             time.sleep(1)
 
@@ -357,11 +361,11 @@ def get_next_chirp_par_file(conf, d):
 
                 # proceed if this hasn't already been analyzed.
                 if not os.path.exists("%s.done" % (ftry)):
-                    h = h5py.File(ftry, "r")
-                    t0 = float(np.copy(h[("t0")]))
-                    i0 = np.int64(t0*conf.sample_rate)
-                    chirp_rate = float(np.copy(h[("chirp_rate")]))
-                    h.close()
+                    h5file = h5py.File(ftry, "r")
+                    t0 = float(np.copy(h5file[("t0")]))
+                    i0 = np.int64(t0*sample_rate)
+                    chirp_rate = float(np.copy(h5file[("chirp_rate")]))
+                    h5file.close()
                     t1 = conf.maximum_analysis_frequency/chirp_rate + t0
 
                     tnow = time.time()
@@ -395,20 +399,22 @@ def get_next_chirp_par_file(conf, d):
         time.sleep(1)
 
 
-def analyze_parfiles(conf, d):
+def analyze_parfiles(conf, data):
     """ 
     Realtime analysis using newly found parameter files.
     """
     ch = conf.channel
+    sample_rate, center_freq = get_metadata(data, ch)
+    
     while True:
 
-        ftry = get_next_chirp_par_file(conf, d)
+        ftry = get_next_chirp_par_file(conf, data)
 
-        h = h5py.File(ftry, "r")
-        t0 = float(np.copy(h[("t0")]))
-        i0 = np.int64(t0*conf.sample_rate)
-        chirp_rate = float(np.copy(h[("chirp_rate")]))
-        h.close()
+        h5file = h5py.File(ftry, "r")
+        t0 = float(np.copy(h5file[("t0")]))
+        i0 = np.int64(t0*sample_rate)
+        chirp_rate = float(np.copy(h5file[("chirp_rate")]))
+        h5file.close()
 
         # Spawn a separate process to copy the files off the ring buffer and place them
         # into the raw IQ staging directory
@@ -451,8 +457,8 @@ if __name__ == "__main__":
         time.sleep(rank * 2)
         while True:
             try:
-                d = drf.DigitalRFReader(conf.data_dir)
-                analyze_parfiles(conf, d)
+                data = drf.DigitalRFReader(conf.data_dir)
+                analyze_parfiles(conf, data)
             except:
                 print("error in calc_ionograms.py. trying to restart")
                 traceback.print_exc(file=sys.stdout)
@@ -461,12 +467,12 @@ if __name__ == "__main__":
     elif conf.realtime:  # analyze analytic timings
         while True:
             try:
-                d = drf.DigitalRFReader(conf.data_dir)
-                analyze_realtime(conf, d)
+                data = drf.DigitalRFReader(conf.data_dir)
+                analyze_realtime(conf, data)
             except:
                 print("error in calc_ionograms.py. trying to restart")
                 sys.stdout.flush()
                 time.sleep(1)
     else:  # batch analyze
-        d = drf.DigitalRFReader(conf.data_dir)
-        analyze_all(conf, d)
+        data = drf.DigitalRFReader(conf.data_dir)
+        analyze_all(conf, data)

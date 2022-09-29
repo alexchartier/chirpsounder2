@@ -3,7 +3,7 @@
 # Scan through a digital rf recording
 #
 import numpy as n
-import chirp_det as c
+import chirp_det as cd
 import chirp_config as cc
 import digital_rf as drf
 from mpi4py import MPI
@@ -17,13 +17,15 @@ rank = comm.Get_rank()
 
 
 def scan_for_chirps(conf, cfb, block0=None):
-    d = drf.DigitalRFReader(conf.data_dir)
-    b = d.get_bounds(conf.channel)
+    data = drf.DigitalRFReader(conf.data_dir)
+    
+    sample_rate, center_freq = get_metadata(data, conf.channel)
+    bounds = data.get_bounds(conf.channel)
 
     if block0 == None:
-        block0 = int(n.ceil(b[0]/(conf.n_samples_per_block*conf.step)))
+        block0 = int(n.ceil(bounds[0]/(conf.n_samples_per_block*conf.step)))
 
-    block1 = int(n.floor(b[1]/(conf.n_samples_per_block*conf.step)))
+    block1 = int(n.floor(bounds[1]/(conf.n_samples_per_block*conf.step)))
 
     # mpi scan through dataset
     for block_idx in range(block0, block1):
@@ -33,24 +35,30 @@ def scan_for_chirps(conf, cfb, block0=None):
             try:
                 cput0 = time.time()
                 # we may skip over data (step > 1) to speed up detection
-                i0 = block_idx*conf.n_samples_per_block*conf.step
+                i0 = block_idx * conf.n_samples_per_block * conf.step
                 #            i0=block_idx*conf.n_samples_per_block*conf.step + idx0
                 # read vector from recording
-                z = d.read_vector_c81d(
+                z = data.read_vector_c81d(
                     i0, conf.n_samples_per_block, conf.channel)
                 snrs, chirp_rates, f0s = cfb.seek(z, i0)
                 cput1 = time.time()
-                analysis_time = (conf.n_samples_per_block *
-                                 conf.step)/conf.sample_rate
-                print("%d/%d Analyzing %s speed %1.2f * realtime" % (rank,
-                                                                     size,
-                                                                     c.unix2datestr(
-                                                                         i0/conf.sample_rate),
-                                                                     size*analysis_time/(cput1-cput0)))
+                analysis_time = (conf.n_samples_per_block * conf.step) / sample_rate
+                print("%d/%d Analyzing %s speed %1.2f * realtime" % (
+                    rank, size, cd.unix2datestr(i0/conf.sample_rate), size*analysis_time/(cput1-cput0),
+                ))
             except:
                 print("error")
                 traceback.print_exc()
     return(block1)
+
+
+def get_metadata(data, channel):
+    # pull SR and centerfreq from file to avoid errors
+    meta = data.get_digital_metadata(channel).read()
+    meta = meta[next(iter(meta.keys()))]
+    sample_rate = meta['receiver']['samp_rate']
+    center_freq = meta['receiver']['center_freq']
+    return sample_rate, center_freq
 
 
 if __name__ == "__main__":
@@ -59,7 +67,7 @@ if __name__ == "__main__":
     else:
         conf = cc.chirp_config()
 
-    cfb = c.chirp_matched_filter_bank(conf)
+    cfb = cd.chirp_matched_filter_bank(conf)
 
     if not conf.realtime:
         scan_for_chirps(conf, cfb)
