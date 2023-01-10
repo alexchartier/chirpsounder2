@@ -28,8 +28,6 @@ class chirp_config:
                        "output_dir": '"./chirp2"',
                        "range_resolution": "2e3",
                        "frequency_resolution": "50e3",
-                       "maximum_analysis_frequency": "25e6",
-                       "minimum_analysis_frequency": "0.0",
                        "max_range_extent": "2000e3",
                        "plot_timings": "false",
                        "realtime": "false",
@@ -74,13 +72,10 @@ class chirp_config:
             c["config"]["frequency_resolution"])
         self.channel = json.loads(c["config"]["channel"])
         self.step = json.loads(c["config"]["step"])
-        self.maximum_analysis_frequency = json.loads(
-            c["config"]["maximum_analysis_frequency"])
-        self.minimum_analysis_frequency = json.loads(
-            c["config"]["minimum_analysis_frequency"])
         self.output_dir = json.loads(c["config"]["output_dir"])
         self.output_dir_time = json.loads(c["config"]["output_dir_time"])
-        self.data_staging_dir = json.loads(c["config"]["data_staging_dir"])
+        if c["config"]["realtime"] == 'true':
+            self.data_staging_dir = json.loads(c["config"]["data_staging_dir"])
         self.save_chirp_iq = json.loads(c["config"]["save_chirp_iq"])
 
         try:
@@ -100,9 +95,9 @@ class chirp_config:
         # (avoid multiple detections of the same chirp)
         self.minimum_frequency_spacing = json.loads(
             c["config"]["minimum_frequency_spacing"])
-        self.df = (float(self.sample_rate)/float(self.n_samples_per_block))
+        self.df = (float(self.sample_rate) / float(self.n_samples_per_block))
         # minimum spacing of detections in fft bins
-        self.mfsi = int(self.minimum_frequency_spacing/self.df)
+        self.mfsi = int(self.minimum_frequency_spacing / self.df)
 
         # how many chirps can we detect simultaneously
         self.max_simultaneous_detections = json.loads(
@@ -111,14 +106,14 @@ class chirp_config:
         self.threshold_snr = json.loads(c["config"]["threshold_snr"])
 
         self.fvec = n.fft.fftshift(n.fft.fftfreq(self.n_samples_per_block,
-                                                 d=1.0/float(self.sample_rate)))+self.center_freq
+                                                 d=1.0 / float(self.sample_rate))) + self.center_freq
 
     def __str__(self):
         out = "Configuration\n"
         for e in dir(self):
             if not callable(getattr(self, e)) and not e.startswith("__"):
                 out += "%s = %s\n" % (e, getattr(self, e))
-        return(out)
+        return (out)
 
 
 if __name__ == "__main__":

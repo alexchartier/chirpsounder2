@@ -23,23 +23,23 @@ except:
 
 
 def power(x):
-    return(x.real**2.0 + x.imag**2.0)
+    return (x.real**2.0 + x.imag**2.0)
 
 
 def fft(x):
     if fftw:
         # ,planner_effort='FFTW_ESTIMATE'))
-        return(pyfftw.interfaces.numpy_fft.fft(x))
+        return (pyfftw.interfaces.numpy_fft.fft(x))
     else:
-        return(scipy.fftpack.fft(x))
+        return (scipy.fftpack.fft(x))
 
 
 def ifft(x):
     if fftw:
         # ,planner_effort='FFTW_ESTIMATE'))
-        return(pyfftw.interfaces.numpy_fft.ifft(x))
+        return (pyfftw.interfaces.numpy_fft.ifft(x))
     else:
-        return(scipy.fftpack.ifft(x))
+        return (scipy.fftpack.ifft(x))
 
 
 debug_out0 = False
@@ -64,15 +64,15 @@ def unix2date(x):
 
 
 def unix2datestr(x):
-    return(unix2date(x).strftime('%Y-%m-%d %H:%M:%S'))
+    return (unix2date(x).strftime('%Y-%m-%d %H:%M:%S'))
 
 
 def unix2dirname(x):
-    return(unix2date(x).strftime('%Y-%m-%d'))
+    return (unix2date(x).strftime('%Y-%m-%d'))
 
 
 def unix2drfdirname(x):
-    return(unix2date(x).strftime('%Y-%m-%dT%H-00-00'))
+    return (unix2date(x).strftime('%Y-%m-%dT%H-00-00'))
 
 
 class chirp_matched_filter_bank:
@@ -85,8 +85,8 @@ class chirp_matched_filter_bank:
         self.wf = n.array(
             ss.hann(self.conf.n_samples_per_block), dtype=n.float32)
         for cr in self.conf.chirp_rates:
-            print("creating filter with chirp-rate %1.2f kHz/s" % (cr/1e3))
-            chirp_vec = n.array(self.wf*n.conj(self.chirpf(cr=cr)))
+            print("creating filter with chirp-rate %1.2f kHz/s" % (cr / 1e3))
+            chirp_vec = n.array(self.wf * n.conj(self.chirpf(cr=cr)))
             self.chirps.append(chirp_vec)
         self.n_chirps = len(self.chirps)
 
@@ -97,10 +97,11 @@ class chirp_matched_filter_bank:
         L = self.conf.n_samples_per_block
         sr = self.conf.sample_rate
         f0 = 0.0
-        tv = n.arange(L, dtype=n.float64)/float(sr)
-        dphase = 0.5*tv**2*cr*2*n.pi
-        chirp = n.exp(1j*n.mod(dphase, 2*n.pi))*n.exp(1j*2*n.pi*f0*tv)
-        return(n.array(chirp, dtype=n.complex64))
+        tv = n.arange(L, dtype=n.float64) / float(sr)
+        dphase = 0.5 * tv**2 * cr * 2 * n.pi
+        chirp = n.exp(1j * n.mod(dphase, 2 * n.pi)) * \
+            n.exp(1j * 2 * n.pi * f0 * tv)
+        return (n.array(chirp, dtype=n.complex64))
 
     def seek(self, z, i0):
         """
@@ -111,15 +112,15 @@ class chirp_matched_filter_bank:
         cput0 = time.time()
         n_samps = len(z)
 
-        t0 = i0/self.conf.sample_rate
+        t0 = i0 / self.conf.sample_rate
 
         if n_samps != self.conf.n_samples_per_block:
             print("wrong number of samples given to matched filter")
             exit(0)
 
         # whiten noise with a regularized filter
-        Z = fft(self.wf*z)
-        z = ifft(Z/(n.abs(Z)+1e-9))
+        Z = fft(self.wf * z)
+        z = ifft(Z / (n.abs(Z) + 1e-9))
 
         # matched filter output
         # store the best matching chirp-rate and
@@ -131,7 +132,8 @@ class chirp_matched_filter_bank:
         mf = n.zeros([self.n_chirps, n_samps], dtype=n.float32)
 
         for cri in range(self.n_chirps):
-            mf[cri, :] = power(n.fft.fftshift(fft(self.wf*self.chirps[cri]*z)))
+            mf[cri, :] = power(n.fft.fftshift(
+                fft(self.wf * self.chirps[cri] * z)))
             # combined max SNR for all chirps
             idx = n.where(mf[cri, :] > mf_p)[0]
             # find peak match function at each point
@@ -155,22 +157,22 @@ class chirp_matched_filter_bank:
             # chirp frequency at the leading edge of the signal
             f0 = self.conf.fvec[mi]
             # clear region around detection
-            mf_p[n.max([0, mi-self.conf.mfsi]):n.min([mi+self.conf.mfsi, n_samps-1])] = 0.0
+            mf_p[n.max([0, mi - self.conf.mfsi]):n.min([mi + self.conf.mfsi, n_samps - 1])] = 0.0
             # this is the chirp rate we've detected
             detected_chirp_rate = self.conf.chirp_rates[mf_chirp_rate_idx[mi]]
 
             # did we find a chirp?
             if snr_max > self.conf.threshold_snr:
                 # the virtual start time
-                chirp_time = t0 - f0/detected_chirp_rate
+                chirp_time = t0 - f0 / detected_chirp_rate
                 debug1("found chirp snr %1.2f chirp-rate %1.2f f0 %1.2f chirp_time %1.4f %s" %
-                       (snr_max, detected_chirp_rate/1e3, f0/1e6, chirp_time, unix2datestr(chirp_time)))
+                       (snr_max, detected_chirp_rate / 1e3, f0 / 1e6, chirp_time, unix2datestr(chirp_time)))
                 snrs.append(snr_max)
                 chirp_rates.append(detected_chirp_rate)
                 frequencies.append(f0)
 
                 dname = "%s/%s" % (self.conf.output_dir,
-                                   unix2dirname(float(i0)/self.conf.sample_rate))
+                                   unix2dirname(float(i0) / self.conf.sample_rate))
 
                 if not os.path.exists(dname):
                     print("creating %s" % (dname))
@@ -192,6 +194,6 @@ class chirp_matched_filter_bank:
 
         cput1 = time.time()
 
-        data_dt = (n_samps/float(self.conf.sample_rate))
+        data_dt = (n_samps / float(self.conf.sample_rate))
 
-        return(snrs, chirp_rates, frequencies)
+        return (snrs, chirp_rates, frequencies)

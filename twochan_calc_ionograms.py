@@ -42,14 +42,16 @@ def get_m_per_Hz(rate):
 
 def spectrogram(x, window=1024, step=512, wf=ss.hann(1024)):
     n_spec = int((len(x) - window) / step)
-    S = np.zeros([n_spec, window])
+    S = np.zeros([n_spec, window], dtype='complex128')
     for i in range(n_spec):
-        S[i, ] = np.abs(np.fft.fftshift(
-            np.fft.fft(wf * x[(i * step):(i * step + window)])))**2.0
+        S[i, ] = np.fft.fftshift(np.fft.fft(
+            wf * x[(i * step):(i * step + window)]))
+        # S[i, ] = np.abs(np.fft.fftshift(
+        #    np.fft.fft(wf * x[(i * step):(i * step + window)])))**2.0
 
     # normalize scale to float16
-    S = 5e4 * S / np.nanmax(S)
-    return (S)
+    # S = 5e4 * S / np.nanmax(S)
+    return S
 
 
 def copy_data_files(conf, copy_q, move_q):
@@ -229,7 +231,8 @@ def chirp_downconvert(conf,
         ofname = "%s/lfm_ionogram-%03d-%1.2f.h5" % (dname, cid, t0)
         print("Writing to %s" % ofname)
         ho = h5py.File(ofname, "w")
-        ho["S"] = S[:, ridx]          # ionogram frequency-range
+        ho["S"] = S          # ionogram frequency-range
+        ho["ridx"] = ridx          # range indices
         ho["freqs"] = freqs  # frequency bins
         ho["rate"] = rate    # chirp-rate
         ho["ranges"] = range_gates[ridx]
@@ -404,7 +407,6 @@ def get_next_chirp_par_file(conf, data):
                         ho["t_an"] = time.time()
                         ho.close()
                         time.sleep(0.01)
-
         # didn't find anything. let's wait.
         time.sleep(1)
 

@@ -18,14 +18,15 @@ rank = comm.Get_rank()
 
 def scan_for_chirps(conf, cfb, block0=None):
     data = drf.DigitalRFReader(conf.data_dir)
-    
+
     sample_rate, center_freq = get_metadata(data, conf.channel)
     bounds = data.get_bounds(conf.channel)
 
     if block0 == None:
-        block0 = int(n.ceil(bounds[0]/(conf.n_samples_per_block*conf.step)))
+        block0 = int(
+            n.ceil(bounds[0] / (conf.n_samples_per_block * conf.step)))
 
-    block1 = int(n.floor(bounds[1]/(conf.n_samples_per_block*conf.step)))
+    block1 = int(n.floor(bounds[1] / (conf.n_samples_per_block * conf.step)))
 
     # mpi scan through dataset
     for block_idx in range(block0, block1):
@@ -42,14 +43,16 @@ def scan_for_chirps(conf, cfb, block0=None):
                     i0, conf.n_samples_per_block, conf.channel)
                 snrs, chirp_rates, f0s = cfb.seek(z, i0)
                 cput1 = time.time()
-                analysis_time = (conf.n_samples_per_block * conf.step) / sample_rate
+                analysis_time = (conf.n_samples_per_block *
+                                 conf.step) / sample_rate
                 print("%d/%d Analyzing %s speed %1.2f * realtime" % (
-                    rank, size, cd.unix2datestr(i0/conf.sample_rate), size*analysis_time/(cput1-cput0),
+                    rank, size, cd.unix2datestr(
+                        i0 / conf.sample_rate), size * analysis_time / (cput1 - cput0),
                 ))
             except:
                 print("error")
                 traceback.print_exc()
-    return(block1)
+    return (block1)
 
 
 def get_metadata(data, channel):

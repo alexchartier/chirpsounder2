@@ -25,7 +25,7 @@ print(u.get_mboard_sensor("gps_servo"))
 print(u.get_mboard_sensor("ref_locked"))
 print(u.get_mboard_sensor("mimo_locked"))
 tnow = u.get_time_last_pps().get_real_secs()
-tstart = math.ceil(tnow)+10.0
+tstart = math.ceil(tnow) + 10.0
 print("Time of last PPS %1.2f Starting sampling at %1.2f" % (tnow, tstart))
 # u.set_start_time(uhd.time_spec(tstart))
 #ns = gr.null_sink(gr.sizeof_gr_complex)

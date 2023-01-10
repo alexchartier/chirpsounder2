@@ -11,15 +11,17 @@ import sys
 import chirp_det as cd
 import os
 import time
+from detect_chirps import get_metadata
+import digital_rf as drf
 
 
 def cluster_times(t, dt=0.1, dt2=0.02, min_det=2):
-    t0s = dt*n.array(n.unique(n.array(n.round(t/dt),
-                     dtype=n.int64)), dtype=n.float64)
+    t0s = dt * n.array(n.unique(n.array(n.round(t / dt),
+                                        dtype=n.int64)), dtype=n.float64)
     ct0s = []
 
     for t0 in t0s:
-        tidx = n.where(n.abs(t-t0) < dt)[0]
+        tidx = n.where(n.abs(t - t0) < dt)[0]
         if len(tidx) >= min_det:
             ct0s.append(n.mean(t[tidx]))
 
@@ -27,18 +29,18 @@ def cluster_times(t, dt=0.1, dt2=0.02, min_det=2):
     ct0s = []
     num_dets = []
     for t0 in t0s:
-        tidx = n.where(n.abs(t-t0) < dt2)[0]
+        tidx = n.where(n.abs(t - t0) < dt2)[0]
         if len(tidx) >= min_det:
             meant = n.mean(t[tidx])
             good = True
             for ct in ct0s:
-                if n.abs(meant-ct) < dt:  # dupe
+                if n.abs(meant - ct) < dt:  # dupe
                     good = False
             if good:
                 ct0s.append(meant)
                 num_dets.append(len(tidx))
 
-    return(ct0s, num_dets)
+    return (ct0s, num_dets)
 
 
 def scan_for_chirps(conf, dt=0.1):
@@ -46,6 +48,10 @@ def scan_for_chirps(conf, dt=0.1):
     go through data files and look for unique soundings
     """
     data_dir = conf.output_dir
+    rf_data = drf.DigitalRFReader(conf.data_dir)
+    sample_rate, center_freq = get_metadata(rf_data, conf.channel)
+    max_analysis_freq = center_freq + sample_rate / 2
+
     # detection files have names chirp*.h5
 
     if conf.realtime:
@@ -58,7 +64,7 @@ def scan_for_chirps(conf, dt=0.1):
         # if len(fl)>500:  # TODO: changed to 100
         #    fl=fl[(len(fl)-500):len(fl)]
         if len(fl) > 20:
-            fl = fl[(len(fl)-20):len(fl)]
+            fl = fl[(len(fl) - 20):len(fl)]
         if len(fl) == 0:
             print("no chirp detections yet")
             return
@@ -101,7 +107,7 @@ def scan_for_chirps(conf, dt=0.1):
 
             if not conf.realtime:
                 print("Found chirp-rate %1.2f kHz/s t0=%1.4f num_det %d" %
-                      (c/1e3, t0, num_dets[ti]))
+                      (c / 1e3, t0, num_dets[ti]))
                 n_ionograms += 1
 
             if conf.plot_timings:
@@ -116,27 +122,27 @@ def scan_for_chirps(conf, dt=0.1):
             if not os.path.exists(fname):
                 ho = h5py.File(fname, "w")
                 tnow = time.time()
-                t1 = (t0+conf.maximum_analysis_frequency/c)
+                t1 = (t0 + max_analysis_freq / c)
                 print("Found chirp-rate %1.2f kHz/s t0=%1.4f num_det %d started %1.2f s ago %1.2f s left" %
-                      (c/1e3, t0, num_dets[ti], tnow-t0, t1-tnow))
+                      (c / 1e3, t0, num_dets[ti], tnow - t0, t1 - tnow))
                 print("writing file %s" % (fname))
                 ho["chirp_rate"] = c
                 ho["t0"] = t0
-                sweep_idx = n.where((n.abs(chirp_times-t0) < dt)
-                                    & (n.abs(chirp_rates-c) < 0.1))[0]
+                sweep_idx = n.where((n.abs(chirp_times - t0) < dt) &
+                                    (n.abs(chirp_rates - c) < 0.1))[0]
                 ho["f0"] = f0[sweep_idx]
                 ho["t0s"] = chirp_times[sweep_idx]
                 ho["snrs"] = snrs[sweep_idx]
                 ho.close()
 
         if conf.plot_timings:
-            plt.plot(f0[idx]/1e6, chirp_times[idx], ".")
+            plt.plot(f0[idx] / 1e6, chirp_times[idx], ".")
 
         if conf.plot_timings:
             plt.xlabel("Frequency (MHz)")
             plt.ylabel("Time (unix)")
-            plt.xlim([0, conf.maximum_analysis_frequency/1e6])
-            plt.title("Chirp-rate %1.2f kHz/s" % (c/1e3))
+            plt.xlim([0, conf.maximum_analysis_frequency / 1e6])
+            plt.title("Chirp-rate %1.2f kHz/s" % (c / 1e3))
             plt.show()
 
     if not conf.realtime:
